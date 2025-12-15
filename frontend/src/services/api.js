@@ -2,7 +2,6 @@ import axios from 'axios';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
-// Create axios instance
 const api = axios.create({
   baseURL: API_URL,
   headers: {
@@ -10,7 +9,6 @@ const api = axios.create({
   },
 });
 
-// Request interceptor to add token
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
@@ -24,11 +22,10 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor for error handling
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response && error.response.status === 401) {
+    if (error.response?.status === 401) {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
       window.location.href = '/login';
@@ -56,7 +53,14 @@ export const messageAPI = {
   sendMessage: (data) => api.post('/messages', data),
   getMessages: (userId) => api.get(`/messages/${userId}`),
   getConversations: () => api.get('/messages/conversations'),
+  markAsDelivered: (userId) => api.put(`/messages/delivered/${userId}`),
   markAsRead: (userId) => api.put(`/messages/read/${userId}`),
+  deleteMessage: (messageId) => api.delete(`/messages/${messageId}`),
+  uploadMedia: (formData) => api.post('/messages/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  }),
 };
 
 export default api;
