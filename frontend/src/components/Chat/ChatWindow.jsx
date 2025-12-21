@@ -5,12 +5,12 @@ import { useSocket } from '../../context/SocketContext';
 import UserAvatar from '../Common/UserAvatar';
 import MessageInput from './MessageInput';
 import TypingIndicator from './TypingIndicator';
-import { formatMessageTime } from '../../utils/helpers';
+import MessageItem from './MessageItem';
 import socketService from '../../services/socket';
 
 const ChatWindow = ({ selectedUser, onBack }) => {
   const { user } = useAuth();
-  const { sendMessage, startTyping, stopTyping, onlineUsers } = useSocket();
+  const { onlineUsers } = useSocket();
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -32,17 +32,68 @@ const ChatWindow = ({ selectedUser, onBack }) => {
   }, [messages]);
 
   useEffect(() => {
-    const handleNewMessage = (message) => {
+    // Handle message sent by me (instant display)
+    const handleMessageSent = (message) => {
+      console.log('Message sent event:', message);
       if (
-        message.sender.id === selectedUser?.id ||
-        message.receiver.id === selectedUser?.id
+        message.receiver.id === selectedUser?.id &&
+        message.sender.id === user.id
       ) {
-        setMessages((prev) => [...prev, message]);
-        
-        if (message.sender.id === selectedUser?.id) {
-          markMessagesAsRead();
-        }
+        // Add message instantly to UI
+        setMessages((prev) => {
+          // Check if message already exists
+          const exists = prev.some(m => m.id === message.id);
+          if (!exists) {
+            return [...prev, message];
+          }
+          return prev;
+        });
       }
+    };
+
+    // Handle message received from other user
+    const handleNewMessage = (message) => {
+      console.log('Message received event:', message);
+      if (
+        message.sender.id === selectedUser?.id &&
+        message.receiver.id === user.id
+      ) {
+        setMessages((prev) => {
+          const exists = prev.some(m => m.id === message.id);
+          if (!exists) {
+            return [...prev, message];
+          }
+          return prev;
+        });
+        
+        markMessagesAsRead();
+        
+        // Send read receipt
+        socketService.emit('message-read', {
+          messageId: message.id,
+          senderId: message.sender.id,
+        });
+      }
+    };
+
+    const handleMessageDelivered = ({ messageId, deliveredAt }) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId ? { ...msg, isDelivered: true, deliveredAt } : msg
+        )
+      );
+    };
+
+    const handleMessageRead = ({ messageId, readAt }) => {
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === messageId ? { ...msg, isRead: true, readAt } : msg
+        )
+      );
+    };
+
+    const handleMessageDeleted = ({ messageId }) => {
+      setMessages((prev) => prev.filter((msg) => msg.id !== messageId));
     };
 
     const handleUserTyping = ({ userId }) => {
@@ -58,26 +109,24 @@ const ChatWindow = ({ selectedUser, onBack }) => {
       }
     };
 
-    const handleMessageRead = ({ messageId, readAt }) => {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === messageId ? { ...msg, isRead: true, readAt } : msg
-        )
-      );
-    };
-
+    socketService.on('message-sent', handleMessageSent);
     socketService.on('message-received', handleNewMessage);
+    socketService.on('message-delivered', handleMessageDelivered);
+    socketService.on('message-read-receipt', handleMessageRead);
+    socketService.on('message-deleted-for-everyone', handleMessageDeleted);
     socketService.on('user-typing', handleUserTyping);
     socketService.on('user-stopped-typing', handleUserStoppedTyping);
-    socketService.on('message-read-receipt', handleMessageRead);
 
     return () => {
+      socketService.off('message-sent', handleMessageSent);
       socketService.off('message-received', handleNewMessage);
+      socketService.off('message-delivered', handleMessageDelivered);
+      socketService.off('message-read-receipt', handleMessageRead);
+      socketService.off('message-deleted-for-everyone', handleMessageDeleted);
       socketService.off('user-typing', handleUserTyping);
       socketService.off('user-stopped-typing', handleUserStoppedTyping);
-      socketService.off('message-read-receipt', handleMessageRead);
     };
-  }, [selectedUser]);
+  }, [selectedUser, user.id]);
 
   const fetchMessages = async () => {
     setLoading(true);
@@ -94,20 +143,55 @@ const ChatWindow = ({ selectedUser, onBack }) => {
   const markMessagesAsRead = async () => {
     try {
       await messageAPI.markAsRead(selectedUser.id);
+      
+      socketService.emit('mark-conversation-read', {
+        userId: selectedUser.id,
+      });
     } catch (error) {
       console.error('Error marking messages as read:', error);
     }
   };
 
-  const handleSendMessage = (content) => {
-    sendMessage(selectedUser.id, content);
+  const handleSendMessage = (content, mediaData = null) => {
+    if (mediaData) {
+      socketService.emit('send-message', {
+        receiverId: selectedUser.id,
+        content: mediaData.caption || '',
+        messageType: mediaData.type,
+        mediaUrl: mediaData.url,
+        mediaName: mediaData.name,
+      });
+    } else {
+      socketService.emit('send-message', {
+        receiverId: selectedUser.id,
+        content,
+        messageType: 'text',
+      });
+    }
   };
 
   const handleTyping = (typing) => {
     if (typing) {
-      startTyping(selectedUser.id);
+      socketService.emit('typing-start', { receiverId: selectedUser.id });
     } else {
-      stopTyping(selectedUser.id);
+      socketService.emit('typing-stop', { receiverId: selectedUser.id });
+    }
+  };
+
+  const handleDeleteMessage = async (messageId, forEveryone = false) => {
+    try {
+      await messageAPI.deleteMessage(messageId);
+      
+      if (forEveryone) {
+        socketService.emit('delete-message', {
+          messageId,
+          forEveryone: true,
+        });
+      }
+      
+      setMessages((prev) => prev.filter((msg) => msg.id !== messageId));
+    } catch (error) {
+      console.error('Error deleting message:', error);
     }
   };
 
@@ -145,7 +229,6 @@ const ChatWindow = ({ selectedUser, onBack }) => {
       {/* Chat Header */}
       <div className="bg-white border-b border-gray-200 p-4">
         <div className="flex items-center gap-3">
-          {/* Back Button - Only visible on mobile */}
           <button
             onClick={onBack}
             className="md:hidden p-2 hover:bg-gray-100 rounded-full transition"
@@ -166,7 +249,7 @@ const ChatWindow = ({ selectedUser, onBack }) => {
             </svg>
           </button>
 
-          <UserAvatar user={selectedUser} showOnline />
+          {/* <UserAvatar user={selectedUser} showOnline />
           
           <div className="flex-1 min-w-0">
             <h2 className="font-semibold text-gray-800 truncate">
@@ -176,79 +259,85 @@ const ChatWindow = ({ selectedUser, onBack }) => {
               {isUserOnline ? (
                 <span className="text-green-600 font-medium">Online</span>
               ) : (
-                'Offline'
+                `Last seen ${new Date(selectedUser.lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
               )}
             </p>
-          </div>
+          </div> 
+          <UserAvatar user={selectedUser} showOnline />*/}
+
+{/* <div className="flex-1 min-w-0">
+  <h2 className="font-semibold text-gray-800 truncate">
+    {selectedUser.name}
+  </h2>
+  <p className="text-sm text-gray-500 truncate">
+    {isUserOnline ? (
+      <span className="text-green-600 font-medium">Online</span>
+    ) : (
+      <span>
+        Last seen{" "}
+        {new Date(selectedUser.lastSeen).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        })}
+      </span>
+    )}
+  </p>
+</div> */}
+
+<UserAvatar user={selectedUser} showOnline />
+
+<div className="flex-1 min-w-0">
+  <h2 className="font-semibold text-gray-800 truncate">
+    {selectedUser.name}
+  </h2>
+  <p className="text-sm text-gray-500 truncate">
+    {isUserOnline ? (
+  <span className="text-green-600 font-medium">Online</span>
+) : (
+  <span>
+    Last seen{" "}
+    {new Date(selectedUser.lastSeen).toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    })}
+  </span>
+)}
+
+  </p>
+</div>
+
+
+
+
         </div>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div 
+        className="flex-1 overflow-y-auto p-4 space-y-2"
+        style={{ 
+          backgroundImage: 'url("data:image/svg+xml,%3Csvg width="100" height="100" xmlns="http://www.w3.org/2000/svg"%3E%3Cpath d="M0 0h100v100H0z" fill="%23f0f0f0"/%3E%3C/svg%3E")',
+          backgroundColor: '#e5ddd5'
+        }}
+      >
         {loading ? (
           <div className="flex justify-center items-center h-full">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
         ) : messages.length === 0 ? (
           <div className="text-center text-gray-500 mt-8">
-            No messages yet. Start the conversation!
+            <p className="mb-2">No messages yet</p>
+            <p className="text-sm">Start the conversation!</p>
           </div>
         ) : (
-          messages.map((msg) => {
-            const isSent = msg.sender.id === user.id;
-            return (
-              <div
-                key={msg.id}
-                className={`flex ${isSent ? 'justify-end' : 'justify-start'} slide-up`}
-              >
-                <div
-                  className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg break-words ${
-                    isSent
-                      ? 'bg-primary text-white'
-                      : 'bg-white text-gray-800 border border-gray-200'
-                  }`}
-                >
-                  <p className="break-words">{msg.content}</p>
-                  <div className={`flex items-center gap-1 mt-1 text-xs ${
-                    isSent ? 'text-gray-200' : 'text-gray-500'
-                  }`}>
-                    <span>{formatMessageTime(msg.createdAt)}</span>
-                    {isSent && (
-                      <span>
-                        {msg.isRead ? (
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="h-4 w-4 text-blue-300"
-                            viewBox="0 0 20 20"
-                            fill="currentColor"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                        ) : (
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            className="h-4 w-4"
-                            viewBox="0 0 20 20"
-                            fill="currentColor"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                        )}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })
+          messages.map((msg) => (
+            <MessageItem
+              key={msg.id}
+              message={msg}
+              isSent={msg.sender.id === user.id}
+              onDelete={handleDeleteMessage}
+            />
+          ))
         )}
         <div ref={messagesEndRef} />
       </div>
@@ -257,7 +346,10 @@ const ChatWindow = ({ selectedUser, onBack }) => {
       {isTyping && <TypingIndicator userName={selectedUser.name} />}
 
       {/* Message Input */}
-      <MessageInput onSendMessage={handleSendMessage} onTyping={handleTyping} />
+      <MessageInput 
+        onSendMessage={handleSendMessage} 
+        onTyping={handleTyping}
+      />
     </div>
   );
 };

@@ -12,7 +12,7 @@ export const formatTimestamp = (timestamp) => {
   // Less than 1 hour
   if (diff < 3600000) {
     const minutes = Math.floor(diff / 60000);
-    return `${minutes}m ago`;
+    return `${minutes}m`;
   }
 
   // Today
@@ -53,6 +53,19 @@ export const formatMessageTime = (timestamp) => {
   });
 };
 
+// Format date with full details
+export const formatFullDate = (timestamp) => {
+  const date = new Date(timestamp);
+  return date.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+};
+
 // Generate avatar initials
 export const getInitials = (name) => {
   if (!name) return '?';
@@ -82,4 +95,15 @@ export const getAvatarColor = (name) => {
   }
   
   return colors[Math.abs(hash) % colors.length];
+};
+
+// Format file size
+export const formatFileSize = (bytes) => {
+  if (bytes === 0) return '0 Bytes';
+  
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  
+  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
 };

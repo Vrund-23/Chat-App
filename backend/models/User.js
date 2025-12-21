@@ -1,53 +1,18 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
-const userSchema = new mongoose.Schema(
-  {
-    name: {
-      type: String,
-      required: [true, 'Please provide a name'],
-      trim: true,
-    },
-    email: {
-      type: String,
-      sparse: true,
-      unique: true,
-      lowercase: true,
-      trim: true,
-    },
-    mobile: {
-      type: String,
-      sparse: true,
-      unique: true,
-      trim: true,
-    },
-    password: {
-      type: String,
-      required: [true, 'Please provide a password'],
-      minlength: [6, 'Password must be at least 6 characters'],
-      select: false,
-    },
-    profileImage: {
-      type: String,
-      default: '',
-    },
-    isOnline: {
-      type: Boolean,
-      default: false,
-    },
-    lastSeen: {
-      type: Date,
-      default: Date.now,
-    },
-    socketId: {
-      type: String,
-      default: '',
-    },
-  },
-  {
-    timestamps: true,
-  }
-);
+const userSchema = new mongoose.Schema({
+  name: { type: String, required: true, trim: true, index: true },
+  email: { type: String, unique: true, sparse: true, lowercase: true },
+  mobile: { type: String, unique: true, sparse: true },
+  password: { type: String, required: true, select: false },
+  profileImage: { type: String, default: '' },
+  about: { type: String, default: 'Hey there! I am using Vchat.' }, // WhatsApp-like status
+  isOnline: { type: Boolean, default: false },
+  lastSeen: { type: Date, default: Date.now },
+}, { timestamps: true });
+
+// Methods & Hooks (keep existing hash logic)
 
 // Hash password before saving
 userSchema.pre('save', async function (next) {
@@ -66,3 +31,5 @@ userSchema.methods.comparePassword = async function (enteredPassword) {
 const User = mongoose.model('User', userSchema);
 
 export default User;
+// ... 
+

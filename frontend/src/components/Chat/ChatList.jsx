@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useSocket } from '../../context/SocketContext';
 import UserAvatar from '../Common/UserAvatar';
 import { formatTimestamp } from '../../utils/helpers';
+import socketService from '../../services/socket';
 
 const ChatList = ({ selectedUser, onSelectUser }) => {
   const { user, logout } = useAuth();
@@ -14,15 +15,50 @@ const ChatList = ({ selectedUser, onSelectUser }) => {
   const [loading, setLoading] = useState(true);
   const [showMenu, setShowMenu] = useState(false);
   const [showNewChat, setShowNewChat] = useState(false);
+  const [unreadCounts, setUnreadCounts] = useState({});
 
   useEffect(() => {
     fetchConversations();
-  }, []);
+    
+    // Listen for new messages to update unread count
+    const handleNewMessage = (message) => {
+      // If message is not from selected user, increment unread count
+      if (message.receiver.id === user.id && message.sender.id !== selectedUser?.id) {
+        setUnreadCounts(prev => ({
+          ...prev,
+          [message.sender.id]: (prev[message.sender.id] || 0) + 1
+        }));
+        
+        // Update conversation list
+        fetchConversations();
+      }
+    };
+
+    socketService.on('message-received', handleNewMessage);
+
+    return () => {
+      socketService.off('message-received', handleNewMessage);
+    };
+  }, [selectedUser, user.id]);
 
   const fetchConversations = async () => {
     try {
       const response = await messageAPI.getConversations();
-      setConversations(response.data.conversations);
+      const convs = response.data.conversations;
+      
+      setConversations(convs);
+      
+      // Calculate unread counts
+      const counts = {};
+      convs.forEach(conv => {
+        if (conv.lastMessage && 
+            conv.lastMessage.senderId !== user.id && 
+            !conv.lastMessage.isRead) {
+          counts[conv.user.id] = conv.unreadCount || 1;
+        }
+      });
+      setUnreadCounts(counts);
+      
     } catch (error) {
       console.error('Error fetching conversations:', error);
     } finally {
@@ -62,10 +98,17 @@ const ChatList = ({ selectedUser, onSelectUser }) => {
     fetchAllUsers();
   };
 
-  const handleSelectUser = (user) => {
-    onSelectUser(user);
+  const handleSelectUser = (selectedUserData) => {
+    onSelectUser(selectedUserData);
     setShowNewChat(false);
     setSearchQuery('');
+    
+    // Clear unread count for this user
+    setUnreadCounts(prev => {
+      const newCounts = { ...prev };
+      delete newCounts[selectedUserData.id];
+      return newCounts;
+    });
   };
 
   const displayList = showNewChat ? allUsers : conversations;
@@ -223,7 +266,6 @@ const ChatList = ({ selectedUser, onSelectUser }) => {
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           </div>
         ) : showNewChat ? (
-          // New chat - show all users
           allUsers.length === 0 ? (
             <div className="text-center text-gray-500 mt-8 px-4">
               No users found
@@ -248,7 +290,6 @@ const ChatList = ({ selectedUser, onSelectUser }) => {
             ))
           )
         ) : (
-          // Show conversations
           conversations.length === 0 ? (
             <div className="text-center text-gray-500 mt-8 px-4">
               <svg
@@ -277,6 +318,7 @@ const ChatList = ({ selectedUser, onSelectUser }) => {
             conversations.map((conv) => {
               const isOnline = onlineUsers.includes(conv.user.id);
               const isLastMessageMine = conv.lastMessage?.senderId === user.id;
+              const unreadCount = unreadCounts[conv.user.id] || 0;
               
               return (
                 <div
@@ -286,32 +328,42 @@ const ChatList = ({ selectedUser, onSelectUser }) => {
                     selectedUser?.id === conv.user.id ? 'bg-gray-100' : ''
                   }`}
                 >
-                  <UserAvatar user={{ ...conv.user, isOnline }} showOnline />
+                  <div className="relative">
+                    <UserAvatar user={{ ...conv.user, isOnline }} showOnline />
+                    {unreadCount > 0 && (
+                      <div className="absolute -bottom-1 -right-1 bg-green-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center border-2 border-white">
+                        {unreadCount > 9 ? '9+' : unreadCount}
+                      </div>
+                    )}
+                  </div>
+                  
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-baseline mb-1">
-                      <h3 className="font-semibold text-gray-800 truncate">
+                      <h3 className={`font-semibold truncate ${unreadCount > 0 ? 'text-gray-900' : 'text-gray-800'}`}>
                         {conv.user.name}
                       </h3>
                       <span className="text-xs text-gray-500 ml-2 flex-shrink-0">
                         {formatTimestamp(conv.lastMessageTime)}
                       </span>
                     </div>
-                    <p className="text-sm text-gray-500 truncate">
-                      {conv.lastMessage?.messageType === 'image' ? (
-                        <span className="flex items-center gap-1">
-                          📷 Photo
-                        </span>
-                      ) : conv.lastMessage?.messageType === 'video' ? (
-                        <span className="flex items-center gap-1">
-                          🎥 Video
-                        </span>
-                      ) : (
-                        <span>
-                          {isLastMessageMine && '✓ '}
-                          {conv.lastMessage?.content}
-                        </span>
-                      )}
-                    </p>
+                    <div className="flex items-center justify-between">
+                      <p className={`text-sm truncate ${unreadCount > 0 ? 'text-gray-900 font-medium' : 'text-gray-500'}`}>
+                        {conv.lastMessage?.messageType === 'image' ? (
+                          <span className="flex items-center gap-1">
+                            📷 Photo
+                          </span>
+                        ) : conv.lastMessage?.messageType === 'video' ? (
+                          <span className="flex items-center gap-1">
+                            🎥 Video
+                          </span>
+                        ) : (
+                          <span>
+                            {isLastMessageMine && '✓ '}
+                            {conv.lastMessage?.content}
+                          </span>
+                        )}
+                      </p>
+                    </div>
                   </div>
                 </div>
               );

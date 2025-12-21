@@ -2,9 +2,7 @@ import Message from '../models/Message.js';
 import Conversation from '../models/Conversation.js';
 import User from '../models/User.js';
 
-// @desc    Send a message
-// @route   POST /api/messages
-// @access  Private
+// Send message
 export const sendMessage = async (req, res) => {
   try {
     const { receiverId, content, messageType = 'text', mediaUrl, mediaName, mediaSize } = req.body;
@@ -18,7 +16,6 @@ export const sendMessage = async (req, res) => {
       });
     }
 
-    // Find or create conversation
     let conversation = await Conversation.findOne({
       participants: { $all: [senderId, receiverId] },
     });
@@ -29,7 +26,6 @@ export const sendMessage = async (req, res) => {
       });
     }
 
-    // Create message
     const message = await Message.create({
       conversation: conversation._id,
       sender: senderId,
@@ -41,12 +37,10 @@ export const sendMessage = async (req, res) => {
       mediaSize,
     });
 
-    // Update conversation
     conversation.lastMessage = message._id;
     conversation.lastMessageTime = message.createdAt;
     await conversation.save();
 
-    // Populate message
     await message.populate('sender', 'name email mobile profileImage');
     await message.populate('receiver', 'name email mobile profileImage');
 
@@ -84,9 +78,7 @@ export const sendMessage = async (req, res) => {
   }
 };
 
-// @desc    Get conversation messages
-// @route   GET /api/messages/:userId
-// @access  Private
+// Get messages
 export const getMessages = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -104,7 +96,6 @@ export const getMessages = async (req, res) => {
       });
     }
 
-    // Get messages that are not deleted by current user
     const messages = await Message.find({
       conversation: conversation._id,
       deletedBy: { $ne: currentUserId },
@@ -150,9 +141,7 @@ export const getMessages = async (req, res) => {
   }
 };
 
-// @desc    Get all conversations for current user (with last message)
-// @route   GET /api/messages/conversations
-// @access  Private
+// Get conversations with unread count
 export const getConversations = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -163,46 +152,52 @@ export const getConversations = async (req, res) => {
       .populate('participants', 'name email mobile profileImage isOnline lastSeen')
       .populate({
         path: 'lastMessage',
-        match: { deletedBy: { $ne: userId } }, // Don't show deleted messages
+        match: { deletedBy: { $ne: userId } },
       })
       .sort({ lastMessageTime: -1 });
 
-    // Filter out conversations with no messages or deleted last messages
     const validConversations = conversations.filter(conv => conv.lastMessage);
 
-    const formattedConversations = validConversations.map((conv) => {
-      const otherUser = conv.participants.find(
-        (p) => p._id.toString() !== userId.toString()
-      );
+    const formattedConversations = await Promise.all(
+      validConversations.map(async (conv) => {
+        const otherUser = conv.participants.find(
+          (p) => p._id.toString() !== userId.toString()
+        );
 
-      // Count unread messages
-      const unreadCount = 0; // Will be implemented with socket
+        // Count unread messages
+        const unreadCount = await Message.countDocuments({
+          conversation: conv._id,
+          receiver: userId,
+          isRead: false,
+          deletedBy: { $ne: userId },
+        });
 
-      return {
-        id: conv._id,
-        user: {
-          id: otherUser._id,
-          name: otherUser.name,
-          email: otherUser.email,
-          mobile: otherUser.mobile,
-          profileImage: otherUser.profileImage,
-          isOnline: otherUser.isOnline,
-          lastSeen: otherUser.lastSeen,
-        },
-        lastMessage: conv.lastMessage
-          ? {
-              id: conv.lastMessage._id,
-              content: conv.lastMessage.content,
-              messageType: conv.lastMessage.messageType,
-              createdAt: conv.lastMessage.createdAt,
-              isRead: conv.lastMessage.isRead,
-              senderId: conv.lastMessage.sender,
-            }
-          : null,
-        lastMessageTime: conv.lastMessageTime,
-        unreadCount,
-      };
-    });
+        return {
+          id: conv._id,
+          user: {
+            id: otherUser._id,
+            name: otherUser.name,
+            email: otherUser.email,
+            mobile: otherUser.mobile,
+            profileImage: otherUser.profileImage,
+            isOnline: otherUser.isOnline,
+            lastSeen: otherUser.lastSeen,
+          },
+          lastMessage: conv.lastMessage
+            ? {
+                id: conv.lastMessage._id,
+                content: conv.lastMessage.content,
+                messageType: conv.lastMessage.messageType,
+                createdAt: conv.lastMessage.createdAt,
+                isRead: conv.lastMessage.isRead,
+                senderId: conv.lastMessage.sender,
+              }
+            : null,
+          lastMessageTime: conv.lastMessageTime,
+          unreadCount,
+        };
+      })
+    );
 
     res.status(200).json({
       success: true,
@@ -218,9 +213,7 @@ export const getConversations = async (req, res) => {
   }
 };
 
-// @desc    Mark messages as delivered
-// @route   PUT /api/messages/delivered/:userId
-// @access  Private
+// Mark as delivered
 export const markAsDelivered = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -262,9 +255,7 @@ export const markAsDelivered = async (req, res) => {
   }
 };
 
-// @desc    Mark messages as read
-// @route   PUT /api/messages/read/:userId
-// @access  Private
+// Mark as read
 export const markAsRead = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -309,9 +300,7 @@ export const markAsRead = async (req, res) => {
   }
 };
 
-// @desc    Delete message (for me)
-// @route   DELETE /api/messages/:messageId
-// @access  Private
+// Delete message
 export const deleteMessage = async (req, res) => {
   try {
     const { messageId } = req.params;
@@ -326,7 +315,6 @@ export const deleteMessage = async (req, res) => {
       });
     }
 
-    // Check if user is part of this conversation
     if (
       message.sender.toString() !== currentUserId.toString() &&
       message.receiver.toString() !== currentUserId.toString()
@@ -337,12 +325,10 @@ export const deleteMessage = async (req, res) => {
       });
     }
 
-    // Add user to deletedBy array
     if (!message.deletedBy.includes(currentUserId)) {
       message.deletedBy.push(currentUserId);
     }
 
-    // If both users deleted, mark as fully deleted
     if (message.deletedBy.length === 2) {
       message.isDeleted = true;
       message.deletedAt = new Date();
