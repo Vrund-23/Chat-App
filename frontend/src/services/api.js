@@ -46,6 +46,21 @@ export const userAPI = {
   getUsers: () => api.get('/users'),
   getUserById: (id) => api.get(`/users/${id}`),
   searchUsers: (query) => api.get(`/users/search/${query}`),
+  updateProfile: (data) => api.put('/users/profile', data),
+};
+
+// File APIs
+export const fileAPI = {
+  uploadMedia: (formData) => api.post('/upload', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  }),
+  uploadProfilePicture: (formData) => api.post('/upload/profile-picture', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  }),
 };
 
 // Message APIs
@@ -56,11 +71,6 @@ export const messageAPI = {
   markAsDelivered: (userId) => api.put(`/messages/delivered/${userId}`),
   markAsRead: (userId) => api.put(`/messages/read/${userId}`),
   deleteMessage: (messageId) => api.delete(`/messages/${messageId}`),
-  uploadMedia: (formData) => api.post('/messages/upload', formData, {
-    headers: {
-      'Content-Type': 'multipart/form-data',
-    },
-  }),
 };
 
 export default api;

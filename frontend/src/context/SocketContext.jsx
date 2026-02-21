@@ -42,8 +42,28 @@ export const SocketProvider = ({ children }) => {
     };
   }, [isAuthenticated]);
 
-  const sendMessage = (receiverId, content) => {
-    socketService.emit('send-message', { receiverId, content });
+  // UPDATED: Returns a Promise
+  const sendMessage = (receiverId, content, messageType = 'text', mediaData = null) => {
+    return new Promise((resolve, reject) => {
+        const payload = { 
+            receiverId, 
+            content,
+            messageType
+        };
+        
+        if (mediaData) {
+            payload.mediaUrl = mediaData.url;
+            payload.mediaName = mediaData.name;
+        }
+
+        socketService.emit('send-message', payload, (response) => {
+            if (response?.status === 'ok') {
+                resolve(response.data);
+            } else {
+                reject(response?.message || 'Failed to send');
+            }
+        });
+    });
   };
 
   const startTyping = (receiverId) => {

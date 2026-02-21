@@ -49,8 +49,32 @@ export const initializeSocket = (io) => {
 
     socket.emit('online-users', Array.from(connectedUsers.keys()));
 
-    // Send message
-    socket.on('send-message', async (data) => {
+    // Check for undelivered messages
+    const pendingMessages = await Message.find({
+      receiver: socket.userId,
+      isDelivered: false,
+    });
+
+    if (pendingMessages.length > 0) {
+      await Message.updateMany(
+        { receiver: socket.userId, isDelivered: false },
+        { isDelivered: true, deliveredAt: new Date() }
+      );
+
+      // Notify senders that their messages are now delivered
+      pendingMessages.forEach((msg) => {
+        const senderSocketId = connectedUsers.get(msg.sender.toString());
+        if (senderSocketId) {
+          io.to(senderSocketId).emit('message-delivered', {
+            messageId: msg._id,
+            deliveredAt: new Date(),
+          });
+        }
+      });
+    }
+
+    // Send message (Updated with Acknowledgement Callback)
+    socket.on('send-message', async (data, callback) => {
       try {
         const { receiverId, content, messageType = 'text', mediaUrl, mediaName } = data;
 
@@ -72,6 +96,8 @@ export const initializeSocket = (io) => {
           messageType,
           mediaUrl,
           mediaName,
+          isDelivered: false,
+          isRead: false
         });
 
         conversation.lastMessage = message._id;
@@ -103,11 +129,11 @@ export const initializeSocket = (io) => {
           createdAt: message.createdAt,
         };
 
-        socket.emit('message-sent', formattedMessage);
-
+        // Check if receiver is online
         const receiverSocketId = connectedUsers.get(receiverId);
+        
         if (receiverSocketId) {
-          // Mark as delivered if receiver is online
+          // Update DB immediately
           message.isDelivered = true;
           message.deliveredAt = new Date();
           await message.save();
@@ -115,17 +141,32 @@ export const initializeSocket = (io) => {
           formattedMessage.isDelivered = true;
           formattedMessage.deliveredAt = message.deliveredAt;
 
+          // Send to receiver
           io.to(receiverSocketId).emit('message-received', formattedMessage);
           
-          // Send delivery receipt back to sender
+          // Notify Sender that message was delivered (Double Tick)
           socket.emit('message-delivered', {
             messageId: message._id,
             deliveredAt: message.deliveredAt,
           });
         }
+
+        // ACKNOWLEDGEMENT: Verify to sender that server received it (Single Tick)
+        if (callback) {
+          callback({
+            status: 'ok',
+            data: formattedMessage
+          });
+        }
+
       } catch (error) {
         console.error('Error sending message:', error);
-        socket.emit('message-error', { message: 'Failed to send message' });
+        if (callback) {
+          callback({
+            status: 'error',
+            message: 'Failed to send message'
+          });
+        }
       }
     });
 
@@ -170,6 +211,15 @@ export const initializeSocket = (io) => {
             messageId,
             readAt: new Date(),
           });
+        }
+        
+        // Also notify the user who read it (for other open tabs)
+        const readerSocketId = connectedUsers.get(socket.userId);
+        if (readerSocketId) {
+             socket.to(readerSocketId).emit('message-read-receipt', {
+                 messageId, 
+                 readAt: new Date()
+             });
         }
       } catch (error) {
         console.error('Error marking message as read:', error);

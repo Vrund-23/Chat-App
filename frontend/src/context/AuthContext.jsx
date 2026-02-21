@@ -91,6 +91,11 @@ export const AuthProvider = ({ children }) => {
     socketService.disconnect();
   };
 
+  // Update local user state after profile edits
+  const updateUser = (updatedFields) => {
+    setUser((prev) => ({ ...prev, ...updatedFields }));
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -100,6 +105,7 @@ export const AuthProvider = ({ children }) => {
         login,
         register,
         logout,
+        updateUser,
         isAuthenticated: !!token,
       }}
     >

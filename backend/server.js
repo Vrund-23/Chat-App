@@ -27,6 +27,7 @@ connectDB();
 import authRoutes from './routes/authRoutes.js';
 import userRoutes from './routes/userRoutes.js';
 import messageRoutes from './routes/messageRoutes.js';
+import uploadRoutes from './routes/uploadRoutes.js';
 import { initializeSocket } from './socket/socketHandler.js';
 
 const app = express();
@@ -60,6 +61,16 @@ app.use((req, res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/upload', uploadRoutes);
+
+// Serve static files from uploads folder
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -119,7 +130,20 @@ app.use((err, req, res, next) => {
 // Start server
 const PORT = process.env.PORT || 5000;
 
-httpServer.listen(PORT, () => {
+// Handle port-in-use error gracefully so nodemon can recover
+httpServer.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n❌ Port ${PORT} is already in use!`);
+    console.error(`   Fix: Run  taskkill /F /IM node.exe  in a new terminal, then restart.`);
+    process.exit(1);
+  } else {
+    throw err;
+  }
+});
+
+// SO_REUSEADDR — lets the server reclaim the port immediately after a crash/restart
+// even if the OS still shows a TIME_WAIT connection on that port.
+httpServer.listen({ port: PORT, host: '0.0.0.0', ipv6Only: false, reuseAddr: true }, () => {
   const allowedOrigins = getConfiguredOrigins();
   
   console.log(`

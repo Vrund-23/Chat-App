@@ -18,6 +18,8 @@ export const getUsers = async (req, res, next) => {
         email: user.email,
         mobile: user.mobile,
         profileImage: user.profileImage,
+        about: user.about,
+        status: user.status,
         isOnline: user.isOnline,
         lastSeen: user.lastSeen,
       })),
@@ -49,6 +51,8 @@ export const getUserById = async (req, res, next) => {
         email: user.email,
         mobile: user.mobile,
         profileImage: user.profileImage,
+        about: user.about,
+        status: user.status,
         isOnline: user.isOnline,
         lastSeen: user.lastSeen,
       },
@@ -85,9 +89,51 @@ export const searchUsers = async (req, res, next) => {
         email: user.email,
         mobile: user.mobile,
         profileImage: user.profileImage,
+        about: user.about,
+        status: user.status,
         isOnline: user.isOnline,
         lastSeen: user.lastSeen,
       })),
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// @desc    Update current user's profile
+// @route   PUT /api/users/profile
+// @access  Private
+export const updateProfile = async (req, res, next) => {
+  try {
+    const { name, about, profileImage, status } = req.body;
+    const allowed = {};
+    if (name?.trim()) allowed.name = name.trim();
+    if (about !== undefined) allowed.about = about;
+    if (profileImage !== undefined) allowed.profileImage = profileImage;
+    if (status !== undefined) {
+      const validStatuses = ['Online', 'Busy', 'Away', 'Invisible'];
+      if (validStatuses.includes(status)) allowed.status = status;
+    }
+
+    const user = await User.findByIdAndUpdate(
+      req.user._id,
+      { $set: allowed },
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    res.status(200).json({
+      success: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        mobile: user.mobile,
+        about: user.about,
+        status: user.status,
+        profileImage: user.profileImage,
+        isOnline: user.isOnline,
+        lastSeen: user.lastSeen,
+      },
     });
   } catch (error) {
     next(error);

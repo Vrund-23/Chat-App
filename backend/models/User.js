@@ -7,7 +7,8 @@ const userSchema = new mongoose.Schema({
   mobile: { type: String, unique: true, sparse: true },
   password: { type: String, required: true, select: false },
   profileImage: { type: String, default: '' },
-  about: { type: String, default: 'Hey there! I am using Vchat.' }, // WhatsApp-like status
+  about: { type: String, default: 'Hey there! I am using Vchat.' }, // WhatsApp-like bio
+  status: { type: String, enum: ['Online', 'Busy', 'Away', 'Invisible'], default: 'Online' },
   isOnline: { type: Boolean, default: false },
   lastSeen: { type: Date, default: Date.now },
 }, { timestamps: true });

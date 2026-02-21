@@ -1,13 +1,21 @@
 import { useState, useRef, useEffect } from 'react';
+import { fileAPI } from '../../services/api';
 
-const MessageInput = ({ onSendMessage, onTyping }) => {
+const MessageInput = ({ onSendMessage, onTyping, replyTo, onCancelReply }) => {
   const [message, setMessage] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [showMediaPicker, setShowMediaPicker] = useState(false);
   const [selectedMedia, setSelectedMedia] = useState(null);
   const [mediaPreview, setMediaPreview] = useState(null);
+  const [uploading, setUploading] = useState(false);
   const typingTimeoutRef = useRef(null);
   const fileInputRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // Focus input when reply is set
+  useEffect(() => {
+    if (replyTo) inputRef.current?.focus();
+  }, [replyTo]);
 
   const handleChange = (e) => {
     const value = e.target.value;
@@ -17,11 +25,7 @@ const MessageInput = ({ onSendMessage, onTyping }) => {
       setIsTyping(true);
       onTyping(true);
     }
-
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = setTimeout(() => {
       setIsTyping(false);
       onTyping(false);
@@ -31,253 +35,191 @@ const MessageInput = ({ onSendMessage, onTyping }) => {
   const handleFileSelect = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
-    const fileType = file.type.startsWith('image/') ? 'image' : 
-                     file.type.startsWith('video/') ? 'video' : 'file';
-
-    setSelectedMedia({
-      file,
-      type: fileType,
-      name: file.name,
-    });
-
-    // Create preview
+    const fileType = file.type.startsWith('image/') ? 'image'
+      : file.type.startsWith('video/') ? 'video' : 'file';
+    setSelectedMedia({ file, type: fileType, name: file.name });
     const reader = new FileReader();
-    reader.onload = (e) => {
-      setMediaPreview(e.target.result);
-    };
+    reader.onload = (ev) => setMediaPreview(ev.target.result);
     reader.readAsDataURL(file);
-
     setShowMediaPicker(false);
   };
 
-  const handleSendMedia = () => {
-    if (selectedMedia) {
-      // In a real app, you'd upload to a server first
-      // For now, we'll use the local preview URL
+  const handleSendMedia = async () => {
+    if (!selectedMedia) return;
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedMedia.file);
+      const response = await fileAPI.uploadMedia(formData);
+      const fileUrl = `http://localhost:5000${response.data.filePath}`;
       onSendMessage(message, {
         type: selectedMedia.type,
-        url: mediaPreview,
+        url: fileUrl,
         name: selectedMedia.name,
         caption: message,
       });
-
       setSelectedMedia(null);
       setMediaPreview(null);
       setMessage('');
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Failed to upload file');
+    } finally {
+      setUploading(false);
     }
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
     if (selectedMedia) {
       handleSendMedia();
     } else if (message.trim()) {
       onSendMessage(message.trim());
       setMessage('');
     }
-    
     if (isTyping) {
       setIsTyping(false);
       onTyping(false);
     }
-    
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
   };
 
   useEffect(() => {
-    return () => {
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
-    };
+    return () => { if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current); };
   }, []);
 
+  const canSend = (message.trim() || selectedMedia) && !uploading;
+
   return (
-    <div className="bg-gray-100 border-t border-gray-200">
-      {/* Media Preview */}
+    <div className="bg-gray-100 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
+
+      {/* ── Reply Preview Bar ─────────────────────────────────────── */}
+      {replyTo && (
+        <div className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-700 border-b border-gray-100 dark:border-gray-600">
+          <div className="flex-1 border-l-4 border-primary pl-2">
+            <p className="text-xs font-semibold text-primary dark:text-tertiary">
+              {replyTo.sender?.name || 'Unknown'}
+            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+              {replyTo.content || '📎 Attachment'}
+            </p>
+          </div>
+          <button
+            onClick={onCancelReply}
+            className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 transition"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {/* ── Media Preview ─────────────────────────────────────────── */}
       {selectedMedia && (
-        <div className="p-4 border-b border-gray-200 bg-white">
+        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700">
           <div className="flex items-start gap-3">
             <div className="flex-shrink-0">
               {selectedMedia.type === 'image' ? (
-                <img
-                  src={mediaPreview}
-                  alt="Preview"
-                  className="w-20 h-20 object-cover rounded-lg"
-                />
+                <img src={mediaPreview} alt="Preview" className="w-16 h-16 object-cover rounded-lg" />
               ) : selectedMedia.type === 'video' ? (
-                <video
-                  src={mediaPreview}
-                  className="w-20 h-20 object-cover rounded-lg"
-                />
+                <video src={mediaPreview} className="w-16 h-16 object-cover rounded-lg" />
               ) : (
-                <div className="w-20 h-20 bg-gray-200 rounded-lg flex items-center justify-center">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-10 w-10 text-gray-400"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
+                <div className="w-16 h-16 bg-gray-200 dark:bg-gray-600 rounded-lg flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                 </div>
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-700 truncate">
-                {selectedMedia.name}
-              </p>
-              <p className="text-xs text-gray-500">
-                {selectedMedia.type.toUpperCase()}
-              </p>
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-200 truncate">{selectedMedia.name}</p>
+              <p className="text-xs text-gray-500 dark:text-gray-400">{selectedMedia.type.toUpperCase()}</p>
             </div>
             <button
-              onClick={() => {
-                setSelectedMedia(null);
-                setMediaPreview(null);
-              }}
-              className="p-1 hover:bg-gray-100 rounded-full"
+              onClick={() => { setSelectedMedia(null); setMediaPreview(null); }}
+              className="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded-full transition"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-5 w-5 text-gray-500"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
         </div>
       )}
 
-      {/* Input Form */}
-      <form onSubmit={handleSubmit} className="p-4">
+      {/* ── Input Row ─────────────────────────────────────────────── */}
+      <form onSubmit={handleSubmit} className="p-3">
         <div className="flex gap-2 items-end">
-          {/* Attachment Button */}
+
+          {/* Attachment */}
           <div className="relative">
             <button
               type="button"
               onClick={() => setShowMediaPicker(!showMediaPicker)}
-              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-full transition"
+              className="p-2.5 text-gray-500 dark:text-gray-400 hover:text-primary hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full transition"
             >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                className="h-6 w-6"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 4v16m8-8H4"
-                />
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
               </svg>
             </button>
 
-            {/* Media Picker Menu */}
             {showMediaPicker && (
-              <div className="absolute bottom-full left-0 mb-2 bg-white rounded-lg shadow-lg py-2 w-48">
+              <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-700 rounded-xl shadow-xl border border-gray-100 dark:border-gray-600 py-2 w-40 z-20">
                 <button
                   type="button"
-                  onClick={() => {
-                    fileInputRef.current.accept = 'image/*';
-                    fileInputRef.current.click();
-                  }}
-                  className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center gap-2"
+                  onClick={() => { fileInputRef.current.accept = 'image/*'; fileInputRef.current.click(); }}
+                  className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-600 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200"
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-5 w-5 text-blue-500"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                    />
-                  </svg>
-                  <span>Photo</span>
+                  🖼️ Photo
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    fileInputRef.current.accept = 'video/*';
-                    fileInputRef.current.click();
-                  }}
-                  className="w-full text-left px-4 py-2 hover:bg-gray-100 flex items-center gap-2"
+                  onClick={() => { fileInputRef.current.accept = 'video/*'; fileInputRef.current.click(); }}
+                  className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-600 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200"
                 >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="h-5 w-5 text-purple-500"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"
-                    />
-                  </svg>
-                  <span>Video</span>
+                  🎥 Video
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { fileInputRef.current.accept = '*/*'; fileInputRef.current.click(); }}
+                  className="w-full text-left px-4 py-2 hover:bg-gray-50 dark:hover:bg-gray-600 flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200"
+                >
+                  📎 File
                 </button>
               </div>
             )}
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              onChange={handleFileSelect}
-              className="hidden"
-            />
+            <input ref={fileInputRef} type="file" onChange={handleFileSelect} className="hidden" />
           </div>
 
           {/* Text Input */}
           <input
+            ref={inputRef}
             type="text"
             value={message}
             onChange={handleChange}
-            placeholder={selectedMedia ? "Add a caption..." : "Type a message..."}
-            className="flex-1 px-4 py-3 border border-gray-300 rounded-full focus:outline-none focus:ring-2 focus:ring-primary bg-white"
+            onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSubmit(e)}
+            placeholder={selectedMedia ? 'Add a caption...' : replyTo ? `Replying to ${replyTo.sender?.name}...` : 'Type a message...'}
+            className="flex-1 px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-full focus:outline-none focus:ring-2 focus:ring-primary bg-white dark:bg-gray-700 dark:text-white text-sm"
           />
 
           {/* Send Button */}
           <button
             type="submit"
-            disabled={!message.trim() && !selectedMedia}
-            className="p-3 bg-primary text-white rounded-full hover:bg-secondary transition disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+            disabled={!canSend}
+            className={`p-2.5 rounded-full transition-all flex-shrink-0 ${
+              canSend
+                ? 'bg-primary hover:bg-secondary text-white shadow-md hover:shadow-lg scale-100 hover:scale-105'
+                : 'bg-gray-300 dark:bg-gray-600 text-gray-400 cursor-not-allowed'
+            }`}
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-6 w-6"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
-            </svg>
+            {uploading ? (
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+              </svg>
+            )}
           </button>
         </div>
       </form>

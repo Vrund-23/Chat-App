@@ -78,11 +78,16 @@ export const sendMessage = async (req, res) => {
   }
 };
 
-// Get messages
+// Get messages (UPDATED FOR PAGINATION)
 export const getMessages = async (req, res) => {
   try {
     const { userId } = req.params;
     const currentUserId = req.user._id;
+    
+    // Pagination Parameters
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
 
     const conversation = await Conversation.findOne({
       participants: { $all: [currentUserId, userId] },
@@ -96,18 +101,32 @@ export const getMessages = async (req, res) => {
       });
     }
 
+    // Fetch messages with pagination (Newest first, then reversed for UI)
     const messages = await Message.find({
       conversation: conversation._id,
       deletedBy: { $ne: currentUserId },
     })
       .populate('sender', 'name email mobile profileImage')
       .populate('receiver', 'name email mobile profileImage')
-      .sort({ createdAt: 1 });
+      .sort({ createdAt: -1 }) // Get newest first
+      .skip(skip)
+      .limit(limit);
+      
+    // Count total for frontend "load more" logic
+    const totalMessages = await Message.countDocuments({
+      conversation: conversation._id,
+      deletedBy: { $ne: currentUserId },
+    });
+
+    const reversedMessages = messages.reverse();
 
     res.status(200).json({
       success: true,
-      count: messages.length,
-      messages: messages.map((msg) => ({
+      count: reversedMessages.length,
+      total: totalMessages,
+      page,
+      totalPages: Math.ceil(totalMessages / limit),
+      messages: reversedMessages.map((msg) => ({
         id: msg._id,
         conversationId: msg.conversation,
         sender: {
